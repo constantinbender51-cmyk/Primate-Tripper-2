@@ -139,10 +139,15 @@ def _engine(daily, lev=LEVERAGE, fee=0.0025, stop=STOP_FRAC, cash=100):
                 slope_negative = current_sma_short < previous_sma_short
 
                 sig = 0
-                if slope_positive and pos <= 0: # Buy if slope is positive and not already long
+                
+                # REVISED SIGNAL LOGIC TO ENABLE SHORTING/FLIPPING
+                # Signal to go LONG if slope is positive and we are not already LONG
+                if slope_positive and pos <= 0: 
                     sig = 1
-                elif slope_negative and pos > 0: # Sell if slope is negative and currently long
+                # Signal to go SHORT if slope is negative and we are not already SHORT
+                elif slope_negative and pos >= 0: 
                     sig = -1
+                # END REVISED SIGNAL LOGIC
 
                 # 3. enter / flip – LEVERAGE-sized
                 if sig and balance > 0:
@@ -161,7 +166,7 @@ def _engine(daily, lev=LEVERAGE, fee=0.0025, stop=STOP_FRAC, cash=100):
                         
                         trade_log.append({'date': date, 'side': 'EXIT',
                                           'price': r.close, 'pnl': pnl_btc, 'balance': balance})
-                        pos = 0
+                        pos = 0 # Position is now cleared
                         trades += 1
                         
                         # Handle case where closing the position results in account drain
@@ -169,19 +174,19 @@ def _engine(daily, lev=LEVERAGE, fee=0.0025, stop=STOP_FRAC, cash=100):
                             print(f"{date.date()}  LIQUIDATION (FLIP) - Account drained.")
                             break
                         
-                    # --- ENTRY LOGIC ---
-                    # Only enter long positions in bull market with positive slope
-                    if sig == 1: # Only buy (go long)
+                    # --- ENTRY LOGIC (Unified for both Long and Short) ---
+                    # Enter the new position (Long or Short) now that pos=0
+                    if pos == 0 and sig != 0:
                         notional = balance * lev
                         max_size = notional / (r.close * (1 + fee))
-                        pos = sig * max_size
+                        pos = sig * max_size # sig is 1 for long, -1 for short
                         entry = r.close
+                        side_str = "LONG" if sig == 1 else "SHORT"
                         
                         # Check for max leverage available to avoid negative balance from fees
-                        # This simplified check ensures we don't over-leverage based on cash + entry fee
                         if balance - abs(pos * entry) * fee > 0:
                             balance -= abs(pos * entry) * fee
-                            print(f"{date.date()}  LONG POSITION  price={entry:.2f}  bal={balance:.2f}")
+                            print(f"{date.date()}  {side_str} POSITION  price={entry:.2f}  bal={balance:.2f}")
                             trade_log.append({'date': date, 'side': 'ENTRY',
                                               'price': entry, 'pnl': 0, 'balance': balance})
                             trades += 1

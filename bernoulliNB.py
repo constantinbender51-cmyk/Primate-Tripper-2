@@ -84,7 +84,7 @@ def add_features(df):
         trend.append(int(uptrend))
     df['psar_up'] = trend
 
-    def bin3(ser, name):
+def bin3(ser, name):
     roll = ser.rolling(ROLL)
     q1 = roll.quantile(0.33)
     q2 = roll.quantile(0.67)

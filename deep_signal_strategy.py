@@ -9,8 +9,8 @@ import numpy as np # Adding numpy just in case
 SMA_SHORT_PERIOD = 30
 SMA_LONG_PERIOD  = 190
 
-LEVERAGE  = 4.0
-STOP_FRAC = 0.05
+LEVERAGE  = 1.0
+STOP_FRAC = 0.99
 
 # ------------------------------------------------------------------
 # 1. load hourly csv -> daily candles + SMAs

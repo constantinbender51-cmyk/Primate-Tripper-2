@@ -14,21 +14,20 @@ STOP_FRAC = 0.05
 # ------------------------------------------------------------------
 # 1. load hourly csv -> daily candles + SMAs
 # ------------------------------------------------------------------
-def load_daily(path='xbtusd_1h_8y.csv'):
+def load_daily(path=\'xbtusd_1h_8y.csv\'):
     df = pd.read_csv(path)
-    time_col = 'open_time' if 'open_time' in df.columns else 'timestamp'
+    time_col = \'open_time\' if \'open_time\' in df.columns else \'timestamp\'
     df[time_col] = pd.to_datetime(df[time_col])
     df = df.set_index(time_col)
 
-    daily = (df.resample('D')
-               .agg({'open': 'first',
-                     'high': 'max',
-                     'low':  'min',
-                     'close':'last'})
-               .dropna())
+    daily = (df.resample(\'D\')
+               .agg({\'open\': \'first\',
+                     \'high\': \'max\',
+                     \'low\':  \'min\',
+                     \'close\':\'last\'})).dropna()
 
-    daily[f'sma{SMA_SHORT_PERIOD}'] = daily['close'].rolling(SMA_SHORT_PERIOD).mean()
-    daily[f'sma{SMA_LONG_PERIOD}'] = daily['close'].rolling(SMA_LONG_PERIOD).mean()
+    daily[f\'sma{SMA_SHORT_PERIOD}\'] = daily[\'close\'].rolling(SMA_SHORT_PERIOD).mean()
+    daily[f\'sma{SMA_LONG_PERIOD}\'] = daily[\'close\'].rolling(SMA_LONG_PERIOD).mean()
     return daily.dropna()
 
 # ------------------------------------------------------------------
@@ -41,16 +40,27 @@ def _engine(daily, lev=LEVERAGE, fee=0.0025, stop=STOP_FRAC, cash=100):
     trades = 0
     trade_log = []
 
-    sma_short_col = f'sma{SMA_SHORT_PERIOD}'
-    sma_long_col = f'sma{SMA_LONG_PERIOD}'
+    sma_short_col = f\'sma{SMA_SHORT_PERIOD}\
+    sma_long_col = f\'sma{SMA_LONG_PERIOD}\
 
     # Calculate previous SMA values for slope and crossover detection
     prev_sma_short = daily[sma_short_col].shift(1)
     prev_sma_long = daily[sma_long_col].shift(1)
 
+    # Track previous market regime for printing changes
+    prev_is_bull_market = None
+
     for i, (date, r) in enumerate(daily.iterrows()):
-        # Determine market regime
-        is_bull_market = r[sma_short_col] > r[sma_long_col]
+        # Determine current market regime
+        current_is_bull_market = r[sma_short_col] > r[sma_long_col]
+
+        # Print market regime change
+        if prev_is_bull_market is not None and current_is_bull_market != prev_is_bull_market:
+            if current_is_bull_market:
+                print(f\"{date.date()}  MARKET_CHANGE: BULL MARKET\"")
+            else:
+                print(f\"{date.date()}  MARKET_CHANGE: BEAR MARKET\"")
+        prev_is_bull_market = current_is_bull_market
 
         # 1. Stop exit (applies regardless of market regime if a position is open)
         if pos:
@@ -61,16 +71,16 @@ def _engine(daily, lev=LEVERAGE, fee=0.0025, stop=STOP_FRAC, cash=100):
                 balance += pnl_btc - abs(pnl_btc) * fee
                 ret_pct_tot = (balance / cash - 1) * 100
                 pnl_pct = (pnl_btc / bal_before) * 100  # % vs balance before exit
-                print(f"{date.date()}  STOP  side={'LONG' if pos > 0 else 'SHORT'}  "
-                      f"price={st:.2f}  pnl_btc={pnl_btc:+.4f}  pnl_pct={pnl_pct:+.2f}%  "
-                      f"bal={balance:.2f}  cum_ret={ret_pct_tot:+.2f}%")
-                trade_log.append({'date': date, 'side': 'STOP',
-                                  'price': st, 'pnl': pnl_btc, 'balance': balance})
+                print(f\"{date.date()}  CLOSE (STOP)  side={\'LONG\' if pos > 0 else \'SHORT\'}  \"
+                      f\"price={st:.2f}  pnl_btc={pnl_btc:+.4f}  pnl_pct={pnl_pct:+.2f}%  \"
+                      f\"bal={balance:.2f}  cum_ret={ret_pct_tot:+.2f}%\")
+                trade_log.append({\'date\': date, \'side\': \'STOP\',
+                                  \'price\': st, \'pnl\': pnl_btc, \'balance\': balance})
                 pos = 0
                 trades += 1
 
         # Trading logic based on market regime
-        if is_bull_market:
+        if current_is_bull_market:
             # In bull market, trade based on SMA_SHORT_PERIOD slope
             current_sma_short = r[sma_short_col]
             previous_sma_short = prev_sma_short.iloc[i]
@@ -81,16 +91,8 @@ def _engine(daily, lev=LEVERAGE, fee=0.0025, stop=STOP_FRAC, cash=100):
             sig = 0
             if slope_positive and pos <= 0: # Buy if slope is positive and not already long
                 sig = 1
-            elif slope_negative and pos >= 0: # Sell if slope is negative and not already short
-                # This means close long position, or open short if allowed (but concept says stay out of market)
-                # For now, let's interpret this as closing long positions only in bull market
-                # The concept says "sell whenever the 30 sma slope is smaller than 1" which implies closing existing long positions.
+            elif slope_negative and pos > 0: # Sell if slope is negative and currently long
                 sig = -1
-
-            # Print slope events
-            if slope_positive or slope_negative:
-                print(f"{date.date()}  SLOPE  {'POS' if slope_positive else 'NEG'}  "
-                      f"sma30={current_sma_short:.2f}  prev_sma30={previous_sma_short:.2f}")
 
             # 3. enter / flip – LEVERAGE-sized
             if sig and balance > 0:
@@ -100,12 +102,11 @@ def _engine(daily, lev=LEVERAGE, fee=0.0025, stop=STOP_FRAC, cash=100):
                     balance += pnl_btc - abs(pnl_btc) * fee
                     ret_pct_tot = (balance / cash - 1) * 100
                     pnl_pct = (pnl_btc / bal_before) * 100
-                    print(f"{date.date()}  FLIP  side={'LONG' if pos > 0 else 'SHORT'}->"
-                          f"{'LONG' if sig > 0 else 'SHORT'}  price={r.close:.2f}  "
-                          f"pnl_btc={pnl_btc:+.4f}  pnl_pct={pnl_pct:+.2f}%  "
-                          f"bal={balance:.2f}  cum_ret={ret_pct_tot:+.2f}%")
-                    trade_log.append({'date': date, 'side': 'EXIT',
-                                      'price': r.close, 'pnl': pnl_btc, 'balance': balance})
+                    print(f\"{date.date()}  CLOSE (FLIP)  side={\'LONG\' if pos > 0 else \'SHORT\'}  \"
+                          f\"price={r.close:.2f}  pnl_btc={pnl_btc:+.4f}  pnl_pct={pnl_pct:+.2f}%  \"
+                          f\"bal={balance:.2f}  cum_ret={ret_pct_tot:+.2f}%\")
+                    trade_log.append({\'date\': date, \'side\': \'EXIT\',
+                                      \'price\': r.close, \'pnl\': pnl_btc, \'balance\': balance})
                     trades += 1
 
                 # Only enter long positions in bull market with positive slope
@@ -115,8 +116,9 @@ def _engine(daily, lev=LEVERAGE, fee=0.0025, stop=STOP_FRAC, cash=100):
                     pos = sig * max_size
                     entry = r.close
                     balance -= abs(pos * entry) * fee
-                    trade_log.append({'date': date, 'side': 'ENTRY',
-                                      'price': entry, 'pnl': 0, 'balance': balance})
+                    print(f\"{date.date()}  LONG POSITION  price={entry:.2f}  bal={balance:.2f}\")
+                    trade_log.append({\'date\': date, \'side\': \'ENTRY\',
+                                      \'price\': entry, \'pnl\': 0, \'balance\': balance})
                     trades += 1
                 elif sig == -1 and pos > 0: # Close long position if slope is negative
                     pnl_btc = pos * (r.close - entry)
@@ -124,47 +126,54 @@ def _engine(daily, lev=LEVERAGE, fee=0.0025, stop=STOP_FRAC, cash=100):
                     balance += pnl_btc - abs(pnl_btc) * fee
                     ret_pct_tot = (balance / cash - 1) * 100
                     pnl_pct = (pnl_btc / bal_before) * 100
-                    print(f"{date.date()}  CLOSE_LONG  price={r.close:.2f}  "
-                          f"pnl_btc={pnl_btc:+.4f}  pnl_pct={pnl_pct:+.2f}%  "
-                          f"bal={balance:.2f}  cum_ret={ret_pct_tot:+.2f}%")
-                    trade_log.append({'date': date, 'side': 'EXIT',
-                                      'price': r.close, 'pnl': pnl_btc, 'balance': balance})
+                    print(f\"{date.date()}  CLOSE LONG  price={r.close:.2f}  \"
+                          f\"pnl_btc={pnl_btc:+.4f}  pnl_pct={pnl_pct:+.2f}%  \"
+                          f\"bal={balance:.2f}  cum_ret={ret_pct_tot:+.2f}%\")
+                    trade_log.append({\'date\': date, \'side\': \'EXIT\',
+                                      \'price\': r.close, \'pnl\': pnl_btc, \'balance\': balance})
                     pos = 0
                     trades += 1
 
         else: # Bear market: stay out of the market
-            if pos: # If there's an open position, close it immediately
+            if pos: # If there\'s an open position, close it immediately
                 pnl_btc = pos * (r.close - entry)
                 bal_before = balance
                 balance += pnl_btc - abs(pnl_btc) * fee
                 ret_pct_tot = (balance / cash - 1) * 100
                 pnl_pct = (pnl_btc / bal_before) * 100
-                print(f"{date.date()}  BEAR_EXIT  side={'LONG' if pos > 0 else 'SHORT'}  "
-                      f"price={r.close:.2f}  pnl_btc={pnl_btc:+.4f}  pnl_pct={pnl_pct:+.2f}%  "
-                      f"bal={balance:.2f}  cum_ret={ret_pct_tot:+.2f}%")
-                trade_log.append({'date': date, 'side': 'BEAR_EXIT',
-                                  'price': r.close, 'pnl': pnl_btc, 'balance': balance})
+                print(f\"{date.date()}  CLOSE (BEAR MARKET)  side={\'LONG\' if pos > 0 else \'SHORT\'}  \"
+                      f\"price={r.close:.2f}  pnl_btc={pnl_btc:+.4f}  pnl_pct={pnl_pct:+.2f}%  \"
+                      f\"bal={balance:.2f}  cum_ret={ret_pct_tot:+.2f}%\")
+                trade_log.append({\'date\': date, \'side\': \'BEAR_EXIT\',
+                                  \'price\': r.close, \'pnl\': pnl_btc, \'balance\': balance})
                 pos = 0
                 trades += 1
 
     # 4. final exit
     if pos:
-        pnl_btc = pos * (daily["close"].iloc[-1] - entry)
+        pnl_btc = pos * (daily[\"close\"].iloc[-1] - entry)
         balance += pnl_btc - abs(pnl_btc) * fee
-        trade_log.append({'date': daily.index[-1], 'side': 'FINAL_EXIT',
-                          'price': daily["close"].iloc[-1], 'pnl': pnl_btc, 'balance': balance})
+        trade_log.append({\'date\': daily.index[-1], \'side\': \'FINAL_EXIT\',
+                          \'price\': daily[\"close\"].iloc[-1], \'pnl\': pnl_btc, \'balance\': balance})
         trades += 1
 
-    return {'final': balance,
-            'return_%' : (balance / cash - 1) * 100,
-            'trades': trades}
+    print(\"\nFINAL ANALYSIS:\")
+    print(f\"  Final Balance: {balance:.2f}\")
+    print(f\"  Total Return %: {(balance / cash - 1) * 100:+.2f}%\")
+    print(f\"  Total Trades: {trades}\")
+
+    return {\'final\': balance,
+            \'return_%\': (balance / cash - 1) * 100,
+            \'trades\': trades}
 
 # ------------------------------------------------------------------
 # 3. run one simulation
 # ------------------------------------------------------------------
-if __name__ == '__main__':
+if __name__ == \'__main__\':
     daily = load_daily()
     result = _engine(daily)
-    print('One-run result:')
-    for k, v in result.items():
-        print(f'  {k}: {v}')
+    # The final analysis is now printed within the _engine function
+    # No need to print it again here.
+    # print(\'One-run result:\')
+    # for k, v in result.items():
+    #     print(f\'  {k}: {v}\')

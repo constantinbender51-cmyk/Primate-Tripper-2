@@ -89,20 +89,20 @@ def add_features(df):
         roll = ser.rolling(ROLL)
         q1 = roll.quantile(0.33)
         q2 = roll.quantile(0.67)
-        # guarantee q1 < q2
-        q2 = q2.clip(lower=q1 + 1e-8)
-        # build bins only where both quantiles are finite
+        # enforce q1 < q2
+        q2 = q2.where(q2 > q1, q1 + 1e-8)
+
         valid = q1.notna() & q2.notna()
-        bins = np.where(valid,
-                        np.stack([np.full(len(ser), -np.inf),
-                                  q1.values, q2.values,
-                                  np.full(len(ser),  np.inf)], axis=1),
-                        np.nan)
-        # labels for valid rows
-        cat = pd.cut(ser[valid], bins=bins[valid, :], labels=[f'{name}_L', f'{name}_M', f'{name}_H'])
-        dummies = pd.get_dummies(cat, prefix=name)
-        # re-index to original length (fill missing rows with 0)
-        return dummies.reindex(ser.index, fill_value=0)
+        labels = [f'{name}_L', f'{name}_M', f'{name}_H']
+        out = pd.DataFrame(0, index=ser.index, columns=labels)
+
+        for idx in ser[valid].index:
+            edges = [-np.inf, q1.loc[idx], q2.loc[idx], np.inf]
+            out.loc[idx] = pd.cut([ser.loc[idx]], bins=edges, labels=labels).astype(str).map(
+                {f'{name}_L': [1,0,0], f'{name}_M': [0,1,0], f'{name}_H': [0,0,1]}
+            ).fillna(0).iloc[0]
+
+        return out.add_prefix(name + '_')
 
     df = pd.concat([df,
                     bin3(df['mfi'],  'mfi'),

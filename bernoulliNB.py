@@ -1,39 +1,28 @@
-"""
-BTC daily next-bar predictor
-BernoulliNB with 7 binary features, rolling 252-day retrain, walk-forward
-"""
-
 import pandas as pd
 import numpy as np
+import time
 from sklearn.naive_bayes import BernoulliNB
-from tqdm import tqdm   # eye-candy progress bar
 
-# ------------------------------------------------------------------
-# 1. load daily candles (reuse your existing loader)
-# ------------------------------------------------------------------
-def load_daily(path='xbtusd_1h_8y.csv'):
-    try:
-        df = pd.read_csv(path)
-        df['open_time'] = pd.to_datetime(df['open_time'], format='ISO8601')
-        df.set_index('open_time', inplace=True)
-        df.sort_index(inplace=True)
-        daily = df.resample('D').agg({
-            'open':  'first',
-            'high':  'max',
-            'low':   'min',
-            'close': 'last',
-            'volume': 'sum'
-        }).dropna()
-        return daily
-    except Exception as e:
-        print("Data load error:", e); return None
+# ---------- config ----------
+ROLL = 252
+FEATS = ['price_up', 'vol_up', 'sma2_up', 'sma5_up',
+         'sma10_up', 'sma20_up', 'sma50_up']
+BUY, SELL = 0.55, 0.45
+PATH = 'xbtusd_1h_8y.csv'          # your hourly source
+# ------------------------------
 
-# ------------------------------------------------------------------
-# 2. build 7 binary features
-# ------------------------------------------------------------------
-def make_features(daily):
-    df = daily.copy()
-    # 0/1 flags
+def load_daily(path):
+    df = pd.read_csv(path)
+    df['open_time'] = pd.to_datetime(df['open_time'], format='ISO8601')
+    df.set_index('open_time', inplace=True)
+    df.sort_index(inplace=True)
+    daily = (df.resample('D')
+               .agg({'open': 'first', 'high': 'max', 'low': 'min',
+                     'close': 'last', 'volume': 'sum'}).dropna())
+    return daily
+
+def add_features(df):
+    df = df.copy()
     df['price_up'] = (df['close'] > df['open']).astype(int)
     df['vol_up']   = (df['volume'] > df['volume'].shift(1)).astype(int)
     for n in [2, 5, 10, 20, 50]:
@@ -41,62 +30,38 @@ def make_features(daily):
         df[f'sma{n}_up'] = (sma > sma.shift(1)).astype(int)
     return df
 
-# ------------------------------------------------------------------
-# 3. walk-forward engine
-# ------------------------------------------------------------------
-ROLL = 252          # training window length
-BUY  = 0.55         # prob threshold long
-SELL = 0.45         # prob threshold short
-
-def walk_forward(df):
-    feats = ['price_up', 'vol_up', 'sma2_up', 'sma5_up',
-             'sma10_up', 'sma20_up', 'sma50_up']
-    df = df.dropna()            # sma50 needs 50 prior bars
-    preds = []                  # store prob_green & position
+def build_signals(df):
+    df = df.dropna().copy()
     model = BernoulliNB()
-
-    for i in tqdm(range(ROLL, len(df)), desc='walk-forward'):
-        # ---- train window ----
-        X_train = df[feats].iloc[i-ROLL : i]
-        y_train = df['price_up'].iloc[i-ROLL+1 : i+1]   # next-day labels
-
-        # ---- fit ----
-        model.fit(X_train, y_train)
-
-        # ---- predict ----
-        # NEW
-        x_today = df[feats].iloc[i:i+1]         # keeps DataFrame + column names
+    signals = []
+    for i in range(ROLL, len(df)):
+        X = df[FEATS].iloc[i-ROLL:i]
+        y = df['price_up'].iloc[i-ROLL+1:i+1]
+        model.fit(X, y)
+        x_today = df[FEATS].iloc[i:i+1]
         prob = model.predict_proba(x_today)[0, 1]
+        pos = 1 if prob > BUY else -1 if prob < SELL else 0
+        signals.append({'date': df.index[i], 'prob': prob, 'pos': pos})
+    sig = pd.DataFrame(signals).set_index('date')
+    return sig
 
+def main():
+    daily = load_daily(PATH)
+    data  = add_features(daily)
+    sig   = build_signals(data)
 
-        # ---- position rule ----
-        if prob > BUY:   pos =  1
-        elif prob < SELL: pos = -1
-        else:             pos =  0
-        preds.append({'date': df.index[i], 'prob': prob, 'pos': pos})
+    # merge signal + next-day prices for P&L
+    audit = data.join(sig).join(data[['open','close']].shift(-1), rsuffix='_next')
+    audit['pnl'] = audit['pos'] * (audit['close_next'] - audit['open_next'])
+    audit = audit.dropna(subset=['pnl'])
 
-    return pd.DataFrame(preds).set_index('date')
+    # slow print
+    for ts, row in audit.iterrows():
+        print(f"{ts.date()} | "
+              f"O:{row['open']:7.2f} H:{row['high']:7.2f} L:{row['low']:7.2f} C:{row['close']:7.2f} | "
+              f"prob:{row['prob']:.3f} pos:{row['pos']: 2.0f} | "
+              f"P&L:{row['pnl']: 7.2f}")
+        time.sleep(0.01)
 
-# ------------------------------------------------------------------
-# 4. quick performance helper (intraday round-turn)
-# ------------------------------------------------------------------
-def compute_stats(preds, df):
-    merge = preds.join(df[['open', 'close']], how='left')
-    merge['ret'] = merge['pos'] * (merge['close'].shift(-1) - merge['open'].shift(-1))
-    merge = merge.dropna(subset=['ret'])
-    c = merge['ret'].cumsum()
-    sharpe = merge['ret'].mean() / merge['ret'].std() * np.sqrt(365)
-    maxdd  = (c.cummax() - c).max()
-    print(f"Sharpe {sharpe:.2f}  MaxDD {maxdd:.2f}  FinalEq {c.iloc[-1]:.2f}")
-
-# ------------------------------------------------------------------
-# 5. one-click
-# ------------------------------------------------------------------
 if __name__ == "__main__":
-    daily = load_daily()
-    if daily is not None:
-        data  = make_features(daily)
-        preds = walk_forward(data)
-        compute_stats(preds, data)
-        preds.to_csv('nb_signals.csv')
-        print("signals saved -> nb_signals.csv")
+    main()

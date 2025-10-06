@@ -2,7 +2,7 @@
 import pandas as pd
 import ta
 
-df = pd.read_csv('XBTUSD_daily.csv', parse_dates=['date'])
+df = pd.read_csv('btc_daily.csv', parse_dates=['date'])
 
 # 1. 20- and 200-period EMAs
 df['EMA20']  = ta.trend.EMAIndicator(df['close'], window=20).ema_indicator()

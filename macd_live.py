@@ -102,14 +102,16 @@ def flatten_position(api: kf.KrakenFuturesApi):
 
 def place_stop(api: kf.KrakenFuturesApi, side: str, size_btc: float, fill_price: float):
     stop_price = fill_price * (1 - STOP_PCT) if side == "buy" else fill_price * (1 + STOP_PCT)
+    limit_price = stop_price * (0.9999 if side == "buy" else 1.0001)  # 1-tick cushion
     stop_side = "sell" if side == "buy" else "buy"
-    log.info("Placing stop %s at %.2f", stop_side, stop_price)
+    log.info("Placing stop-limit %s  stop=%.2f  limit=%.2f", stop_side, stop_price, limit_price)
     api.send_order(
         {
             "orderType": "stp",
-            "symbol": SYMBOL_FUTS_LC,  # <— lower-case
+            "symbol": SYMBOL_FUTS_LC,
             "side": stop_side,
             "size": round(size_btc, 4),
+            "limitPrice": limit_price,
             "stopPrice": stop_price,
         }
     )

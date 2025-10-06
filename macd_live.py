@@ -77,7 +77,8 @@ def portfolio_usd(api: kf.KrakenFuturesApi) -> float:
 def cancel_all(api: kf.KrakenFuturesApi):
     log.info("Cancelling all orders")
     try:
-        api.cancel_all_orders()
+        rsp = api.cancel_all_orders()
+        log.info("cancel_all_orders response: %s", rsp)
     except Exception as e:
         log.warning("cancel_all_orders failed: %s", e)
 
@@ -158,7 +159,7 @@ def smoke_test(api: kf.KrakenFuturesApi):
 
     # ------------------ 5-minute delay ---------------------------------
     log.info("Waiting 5 min before flattening smoke-test orders…")
-    time.sleep(300)          # 300 s = 5 min
+    time.sleep(3)          # 300 s = 5 min
     # --------------------------------------------------------------------
     flatten_position(api)
     cancel_all(api)

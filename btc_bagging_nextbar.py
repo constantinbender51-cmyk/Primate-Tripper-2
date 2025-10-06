@@ -5,8 +5,6 @@ from sklearn.ensemble import BaggingRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.preprocessing import StandardScaler
 import numpy as np
-from tqdm import tqdm                           # progress-bar utility
-from sklearn.utils import parallel_backend      # hook tqdm into joblib
 
 # 1. Load data ----------------------------------------------------------------
 df = pd.read_csv('btc_daily.csv', parse_dates=['date']).sort_values('date')
@@ -79,27 +77,12 @@ grid = {
     'n_estimators':                [500, 1000],
     'max_samples':                 [0.8],
     'max_features':                [0.8]
-}
+}          # 2×2×2×2 = 16 fits instead of 3 200
 
 bag = BaggingRegressor(estimator=base, random_state=42, n_jobs=-1)
 
-# Grid-search with live progress bar
-with parallel_backend('threading', n_jobs=-1):
-    model = GridSearchCV(
-        bag, grid,
-        cv=5,
-        scoring='neg_mean_absolute_error',
-        n_jobs=-1,
-        verbose=0
-    )
-    # tqdm wrapper: total = 2×2×2×2 = 16 fits
-    with tqdm(total=len(grid['estimator__max_depth']) *
-                     len(grid['estimator__min_samples_leaf']) *
-                     len(grid['estimator__max_features']) *
-                     len(grid['n_estimators'])) as pbar:
-        def _dummy(*args, **kwargs):
-            pbar.update(1)
-        model.fit(X_train, y_train)
+model = GridSearchCV(bag, grid, cv=5, scoring='neg_mean_absolute_error', n_jobs=-1)
+model.fit(X_train, y_train)
 
 print('Best params:', model.best_params_)
 model = model.best_estimator_

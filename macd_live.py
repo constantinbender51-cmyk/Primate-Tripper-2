@@ -146,11 +146,13 @@ def smoke_test(api: kf.KrakenFuturesApi):
     fill_p = float(ord.get("price", mp))
     place_stop(api, "buy", TEST_SIZE_BTC, fill_p)
 
-    # 5. Flatten & cancel
+    # ------------------ 5-minute delay ---------------------------------
+    log.info("Waiting 5 min before flattening smoke-test orders…")
+    time.sleep(300)          # 300 s = 5 min
+    # --------------------------------------------------------------------
     flatten_position(api)
     cancel_all(api)
     log.info("=== Smoke-test complete ===")
-
 
 # ------------------------------------------------------------------
 # signal

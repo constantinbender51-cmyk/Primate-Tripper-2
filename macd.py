@@ -1,35 +1,39 @@
-import pandas as pd
-import numpy as np
+import pandas as pd, numpy as np
 
-# 1. load data
 df = pd.read_csv('btc_daily.csv', parse_dates=['date'])
 
-# 2. MACD(12,26,9)
-ema12 = df['close'].ewm(span=12).mean()
-ema26 = df['close'].ewm(span=26).mean()
+# MACD
+ema12 = df['close'].ewm(12).mean()
+ema26 = df['close'].ewm(26).mean()
 macd = ema12 - ema26
-signal = macd.ewm(span=9).mean()
+signal = macd.ewm(9).mean()
 
-# 3. positions: 1 on bullish cross, -1 on bearish, hold otherwise
-pos = np.where(macd > signal, 1, np.where(macd < signal, -1, np.nan))
+# 1/-1 on cross
+pos = np.where((macd > signal) & (macd.shift() <= signal.shift()), 1,
+              np.where((macd < signal) & (macd.shift() >= signal.shift()), -1, np.nan))
 pos = pd.Series(pos, index=df.index).ffill().fillna(0)
 
-# 4. back-test
-capital = 10_000
-btc = capital / df['close'].iloc[0]          # buy & hold size
-hold = btc * df['close']                     # buy & hold curve
+# back-test with 2 % stop-loss
+cash = 10_000
+strat = [cash]
+in_pos = 0
+entry = np.nan
+for i, p in enumerate(pos[1:], 1):
+    if in_pos == 0 and p != 0:          # enter
+        in_pos, entry = p, df.close.iloc[i]
+    elif in_pos != 0:
+        chg = df.close.iloc[i] / entry - 1
+        if (in_pos == 1 and chg <= -0.02) or (in_pos == -1 and chg >= 0.02):
+            in_pos = 0                  # stopped out
+        elif p == -in_pos:              # opposite signal
+            in_pos = p
+            entry = df.close.iloc[i]
+    strat.append(strat[-1] * (1 + (df.close.iloc[i]/df.close.iloc[i-1]-1)*in_pos))
 
-pct = df['close'].pct_change()
-strat = (1 + pos.shift() * pct).cumprod() * capital
+strat = pd.Series(strat, index=df.index)
+hold = (df.close / df.close.iloc[0]) * cash
 
-# 5. metrics
-max_bal = strat.cummax()
-drawdown = (strat - max_bal) / max_bal
-trades = strat[pos.diff().abs() == 2]        # round-trip exits
-trade_ret = trades.pct_change()
-max_neg = trade_ret.min() * 100              # worst trade
-
+maxbal = strat.cummax()
 print(f"Final MACD: €{strat.iloc[-1]:,.0f}")
 print(f"Final HOLD: €{hold.iloc[-1]:,.0f}")
-print(f"Max trade loss: {max_neg:.1f}%")
-print(f"Max drawdown: {drawdown.min()*100:.1f}%")
+print(f"Max drawdown: {(strat/maxbal-1).min()*100:.1f}%")

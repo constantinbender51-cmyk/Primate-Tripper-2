@@ -118,8 +118,12 @@ def backtest_leveraged(df, clf, feature_cols):
     
     rows = []
     for _, r in test.iterrows():
-        row = [r['date'].strftime('%Y-%m-%d'), r['signal'], f"{prob.iloc[len(rows)]:.4f}",
-               f"{r['ret_btc']:.6f}", f"{r['funding']:.6f}", f"{r['fee']:.6f}"]
+        row = [r['date'].strftime('%Y-%m-%d'),
+               r['signal'],
+               f"{prob[len(rows)]:.4f}",   # <- numpy array, use [] not .iloc
+               f"{r['ret_btc']:.6f}",
+               f"{r['funding']:.6f}",
+               f"{r['fee']:.6f}"]
         for lev in [1,2,5]:
             if liquidated[lev]:
                 pnl, eq = 0.0, 0.0

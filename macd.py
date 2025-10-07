@@ -92,4 +92,41 @@ max_lose_streak = lose_streak.groupby(
 
 # ---------------------------  PRINT  ------------------------------------------
 final_macd = curve.iloc[-1]
-final_hold = (df['close'].iloc[-
+final_hold = (df['close'].iloc[-1] / df['close'].iloc[0]) * 10000
+worst      = min(trades, key=lambda x: x[2])
+
+print(f'\n===== MACD + {STOP_PCT}% intrabar stop-loss ({LEVERAGE}× lev) =====')
+print(f'MACD final:        €{final_macd:,.0f}')
+print(f'Buy & Hold final:  €{final_hold:,.0f}')
+print(f'Worst trade:       {worst[2]*100:.2f}% (exit {worst[1].strftime("%Y-%m-%d")})')
+print(f'Max drawdown:      {maxdd*100:.2f}%')
+time.sleep(0.01)
+
+print('\n----- full performance stats -----')
+print(f'CAGR:               {cagr*100:6.2f}%')
+print(f'Ann. volatility:    {vol*100:6.2f}%')
+print(f'Sharpe (rf=0):      {sharpe:6.2f}')
+print(f'Max drawdown:       {maxdd*100:6.2f}%')
+print(f'Calmar:             {calmar:6.2f}')
+print(f'Trades/year:        {trades_per_year:6.1f}')
+print(f'Win-rate:           {win_rate*100:6.1f}%')
+print(f'Average win:        {avg_win*100:6.2f}%')
+time.sleep(0.01)
+print(f'Average loss:       {avg_loss*100:6.2f}%')
+print(f'Payoff ratio:       {payoff:6.2f}')
+print(f'Profit factor:      {profit_factor:6.2f}')
+print(f'Expectancy/trade:   {expectancy*100:6.2f}%')
+print(f'Kelly fraction:     {kelly*100:6.2f}%')
+print(f'Time in market:     {time_in_mkt*100:6.1f}%')
+print(f'Tail ratio (95/5):  {tail_ratio:6.2f}')
+print(f'Max lose streak:    {max_lose_streak:6.0f}')
+time.sleep(0.01)
+
+# ---------------------  DAY-BY-DAY EQUITY CURVE  ------------------------------
+print('\n----- equity curve (day-by-day) -----')
+print('date       close      equity')
+for idx, row in df.iterrows():
+    print(f"{row['date'].strftime('%Y-%m-%d')}  "
+          f"{row['close']:>10.2f}  "
+          f"{curve[idx]:>10.2f}")
+    time.sleep(0.01)

@@ -89,7 +89,8 @@ class SequenceForecaster:
 # 4.  Demo on the user-supplied sequence
 # ------------------------------------------------------------------
 if __name__ == "__main__":
-    raw = [1, 4, 8, 12, 16]          # extend as needed: 14812162024…
+    raw = [1, 4, 8, 12, 16, 20, 24]   # whatever your real data are
+         # extend as needed: 14812162024…
     k   = 3                          # use 3-grams (tune freely)
 
     fc = SequenceForecaster(k=k, n_trees=500).fit(raw)

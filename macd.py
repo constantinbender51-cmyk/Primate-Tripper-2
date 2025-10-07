@@ -18,7 +18,7 @@ pos = pd.Series(cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
 
 # =====================  SINGLE RUN WITH 6.7 % STOP  ===========================
 STOP_PCT = 6.7
-LEVERAGE = 2.0                                        # << 5× leverage
+LEVERAGE = 3.0                                        # << 5× leverage
 curve = [10000]
 in_pos = 0
 entry_p = None

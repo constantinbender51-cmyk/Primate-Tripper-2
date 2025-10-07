@@ -52,12 +52,17 @@ final_macd = curve.iloc[-1]
 final_hold = (df['close'].iloc[-1] / df['close'].iloc[0]) * 10000
 worst      = min(trades, key=lambda x: x[2])
 maxbal     = curve.cummax()
-quarterly = curve.resample('Q').last()          # Q = quarter-end frequency
-
+# ---- month-end balance -------------------------------------------------------
+month_end_curve = (
+    curve
+    .resample('M')          # calendar month end
+    .last()                 # equity on that day
+    .iloc[:-1]              # drop the still-open current month
+)
 
 print(f"MACD+2%SL final: €{final_macd:,.0f}")
 print(f"B&H final:       €{final_hold:,.0f}")
 print(f"Worst trade:     {worst[2]*100:.1f}% (exit {worst[1].strftime('%Y-%m-%d')})")
 print(f"Max drawdown:    {(curve/maxbal - 1).min()*100:.1f}%")
-
-print(quarterly.to_string())
+print('\nEquity at month-end:')
+print(month_end_curve.to_string())

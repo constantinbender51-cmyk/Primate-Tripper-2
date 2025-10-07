@@ -92,4 +92,11 @@ if __name__ == '__main__':
     # save
     pd.DataFrame(recs).to_csv('MACD_scan_stop_lev.csv', index=False, float_format='%.4f')
     print('saved → MACD_scan_stop_lev.csv')
+    # ------------------------------------------------ pretty print ---------------------------------------
+    print('\n----- full scan results -----')
+    with open('MACD_scan_stop_lev.csv') as f:
+        for line in f:
+            print(line.rstrip())
+            time.sleep(0.01)
+                
   

@@ -74,12 +74,12 @@ class SequenceForecaster:
         return self
 
     def predict(self, context):
-    context = np.asarray(context)
-    if len(context) != self.k:
-        raise ValueError(f"Context must contain exactly k={self.k} symbols, got {len(context)}")
-    probs = self.model.predict_proba(context.reshape(1, -1))[0]
-    best  = self.model.classes_[np.argmax(probs)]
-    return best, dict(zip(self.model.classes_, probs))
+        context = np.asarray(context)
+        if len(context) != self.k:
+            raise ValueError(f"Context must contain exactly k={self.k} symbols, got {len(context)}")
+        probs = self.model.predict_proba(context.reshape(1, -1))[0]
+        best  = self.model.classes_[np.argmax(probs)]
+        return best, dict(zip(self.model.classes_, probs))
 
 # ------------------------------------------------------------------
 # 4.  Demo on the user-supplied sequence

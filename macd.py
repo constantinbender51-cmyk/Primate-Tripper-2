@@ -64,4 +64,7 @@ worst_me  = me_series.min()
 
 print(f"MACD+2%SL final: €{final_macd:,.0f}")
 print(f"B&H final:       €{final_hold:,.0f}")
-print(f"Worst trade: ‌‍
+print(f"Worst trade:     {worst[2]*100:.1f}% (exit {worst[1].strftime('%Y-%m-%d')})")
+print(f"Max drawdown:    {(curve/maxbal - 1).min()*100:.1f}%")
+print(f"Mean month-end:  €{mean_me:,.0f}")
+print(f"Worst month-end: €{worst_me:,.0f}")

@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
-# ------------------------------------------------ live-print equity curve -----
 import time
 
-
+# ------------------------------------------------ live-print equity curve -----
 df = pd.read_csv('btc_daily.csv', parse_dates=['date'])
 
 # ---- MACD (proper warm-up) ----------------------------------------------------
@@ -17,34 +16,40 @@ cross = np.where((macd > signal) & (macd.shift() <= signal.shift()),  1,
                 np.where((macd < signal) & (macd.shift() >= signal.shift()), -1, 0))
 pos = pd.Series(cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
 
-# ---- back-test with 2 % stop --------------------------------------------------
+# ---- back-test with 2 % intrabar stop ----------------------------------------
 curve = [10000]
 in_pos = 0
 entry_p = None
 trades = []
 
 for i in range(1, len(df)):
-    # update price
     p_prev, p_now = df['close'].iloc[i-1], df['close'].iloc[i]
-    
-    # position at bar i is pos.iloc[i] (already shifted above)
     pos_i = pos.iloc[i]
-    
+
     # enter
     if in_pos == 0 and pos_i != 0:
         in_pos, entry_p, entry_d = pos_i, p_now, df['date'].iloc[i]
-    
-    # check stop while in position
+
+    # ---------- 2 % stop uses the bar’s extreme -----------------
     if in_pos != 0:
+        if in_pos == 1:                       # long
+            stop_price = entry_p * 0.98
+            if df['low'].iloc[i] <= stop_price:      # touched
+                trades.append((entry_d, df['date'].iloc[i], -0.02))
+                in_pos = 0
+        else:                                     # short
+            stop_price = entry_p * 1.02
+            if df['high'].iloc[i] >= stop_price:     # touched
+                trades.append((entry_d, df['date'].iloc[i], -0.02))
+                in_pos = 0
+
+    # exit on opposite MACD cross (only if still in)
+    if in_pos != 0 and pos_i == -in_pos:
         ret = (p_now / entry_p - 1) * in_pos
-        if ret <= -0.02:                       # 2 % stop
-            trades.append((entry_d, df['date'].iloc[i], -0.02))
-            in_pos = 0
-        elif pos_i == -in_pos:                 # opposite cross
-            trades.append((entry_d, df['date'].iloc[i], ret))
-            in_pos = pos_i
-            entry_p, entry_d = p_now, df['date'].iloc[i]
-    
+        trades.append((entry_d, df['date'].iloc[i], ret))
+        in_pos = pos_i
+        entry_p, entry_d = p_now, df['date'].iloc[i]
+
     # equity update
     curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos))
 
@@ -122,4 +127,3 @@ for idx, row in df.iterrows():
           f"{row['close']:>10.2f}  "
           f"{curve[idx]:>10.2f}")
     time.sleep(0.01)          # 0.01 s ≈ 10 ms delay between rows
-  

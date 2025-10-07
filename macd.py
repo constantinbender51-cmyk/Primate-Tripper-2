@@ -13,10 +13,13 @@ ema26 = df['close'].ewm(span=26, adjust=False).mean()
 macd  = ema12 - ema26
 signal = macd.ewm(span=9, adjust=False).mean()
 
-#  1 / -1 / 0  on cross
-pos = np.where((macd>signal)&(macd.shift()<=signal.shift()),  1,
-        np.where((macd<signal)&(macd.shift()>=signal.shift()), -1, np.nan))
-pos = pd.Series(pos, index=df.index).ffill().fillna(0)
+#  1 / -1 / 0  on cross  (explicit dtype -> float64)
+pos = pd.Series(
+        np.where((macd > signal) & (macd.shift() <= signal.shift()),  1,
+        np.where((macd < signal) & (macd.shift() >= signal.shift()), -1, np.nan)),
+        index=df.index,
+        dtype='float64'
+      ).ffill().fillna(0)
 
 # ------------------------------------------- single back-test -----------------------------------------
 def one_run(stop_pct, leverage):

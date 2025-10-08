@@ -38,42 +38,47 @@ for i in range(1, len(df)):
         in_pos     = pos_i
         entry_p    = p_now
         entry_d    = df['date'].iloc[i]
-        block_side = 0          # reset block once we are in again    # ----- 1.  stop-loss (intra-bar) ------------------------------------------
-    stopped = False
+        block_side = 0          # reset block once we are in again
+
+        # ---------- 6.7 % intrabar stop ----------
     if in_pos != 0:
-        if in_pos == 1:                       # long
+        if in_pos == 1:                           # long
             stop_price = entry_p * (1 - STOP_PCT/100)
             if df['low'].iloc[i] <= stop_price:
                 trades.append((entry_d, df['date'].iloc[i],
                                -STOP_PCT/100 * LEVERAGE))
                 in_pos     = 0
                 block_side = 1
-                stopped = True
-        else:                                 # short
+                continue                      # <-- skip cross logic this bar
+        else:                                     # short
             stop_price = entry_p * (1 + STOP_PCT/100)
             if df['high'].iloc[i] >= stop_price:
                 trades.append((entry_d, df['date'].iloc[i],
                                -STOP_PCT/100 * LEVERAGE))
                 in_pos     = 0
                 block_side = -1
-                stopped = True
+                continue                      # <-- skip cross logic this bar
 
-    # ----- 2.  cross-based exit OR immediate re-entry -------------------------
-    if in_pos != 0 and pos_i == -in_pos:          # normal cross exit
+    # exit on opposite MACD cross (only reached if still in_pos)
+    if in_pos != 0 and pos_i == -in_pos:
         ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
         trades.append((entry_d, df['date'].iloc[i], ret))
-        in_pos  = 0                                # now flat
-
-    # if we are flat (either via stop or via cross) and a cross is present → enter
-    if in_pos == 0 and pos_i != 0 and pos_i != block_side:
-        in_pos  = pos_i
-        entry_p = p_now
-        entry_d = df['date'].iloc[i]
+        in_pos     = pos_i
+        entry_p    = p_now
+        entry_d    = df['date'].iloc[i]
         block_side = 0
 
-    # ----- 3.  equity update (always) -----------------------------------------
-    curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+    # ----- exit on opposite MACD cross ----------------------------------------
+    if in_pos != 0 and pos_i == -in_pos:
+        ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
+        trades.append((entry_d, df['date'].iloc[i], ret))
+        in_pos     = pos_i
+        entry_p    = p_now
+        entry_d    = df['date'].iloc[i]
+        block_side = 0
 
+    # ----- equity update ------------------------------------------------------
+    curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
 
 curve = pd.Series(curve, index=df.index)
 

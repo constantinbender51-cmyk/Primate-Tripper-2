@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import time
+from tqdm import tqdm   # nice progress bar (pip install tqdm)
 
 # ------------------------------------------------ read data ---------------------
 df = pd.read_csv('btc_daily.csv', parse_dates=['date'])
@@ -16,142 +17,115 @@ cross = np.where((macd > signal) & (macd.shift() <= signal.shift()),  1,
                 np.where((macd < signal) & (macd.shift() >= signal.shift()), -1, 0))
 pos = pd.Series(cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
 
-# =====================  SINGLE RUN (NO STOP-LOSS) =============================
-LEVERAGE = 2.0
-curve    = [10000]
-in_pos   = 0
-entry_p  = None
-entry_d  = None
-trades   = []
-stp = False
-stp_pct = 0.006
-days_stp = 0
-stp_cnt = 0
-stp_cnt_max = 0
+# =====================  GRID: 1.0 – 5.0 =======================================
+lev_grid = np.arange(1.0, 5.1, 0.1)          # 1.0, 1.1, …, 5.0
+summary  = []                                # list-of-dicts for results
 
-for i in range(1, len(df)):
-    p_prev = df['close'].iloc[i-1]
-    p_now  = df['close'].iloc[i]
-    pos_i  = pos.iloc[i]
-    
-    if stp != True and in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
-      stp = True
-      stp_price=curve[-1] * (1 - stp_pct * LEVERAGE)
-      stp_cnt=stp_cnt+1
-      if stp_cnt_max<stp_cnt:
-              stp_cnt_max=stp_cnt_max
-      
-    # ----- entry logic --------------------------------------------------------
-    if in_pos == 0 and pos_i != 0:
-        in_pos  = pos_i
-        entry_p = p_now
-        entry_d = df['date'].iloc[i]
-        stp = False
-        print(f"ENTRY {in_pos}  ")
+for LEVERAGE in tqdm(lev_grid, desc='leverage loop'):
+    # ----------  everything below is identical to your original loop ----------
+    curve    = [10000]
+    in_pos   = 0
+    entry_p  = None
+    entry_d  = None
+    trades   = []
+    stp      = False
+    stp_pct  = 0.006
+    days_stp = 0
+    stp_cnt  = 0
+    stp_cnt_max = 0
 
+    for i in range(1, len(df)):
+        p_prev = df['close'].iloc[i-1]
+        p_now  = df['close'].iloc[i]
+        pos_i  = pos.iloc[i]
 
-    # ----- exit on opposite cross ---------------------------------------------
-    if in_pos != 0 and pos_i == -in_pos:
-        ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
-        if stp == True:
-          trades.append((entry_d, df['date'].iloc[i], -stp_pct*LEVERAGE))
+        # ----- stop-loss check -----
+        if (not stp) and in_pos != 0:
+            hh = df['high'].iloc[i]
+            ll = df['low'].iloc[i]
+            if (entry_p/hh - 1)*in_pos >= stp_pct or (entry_p/ll - 1)*in_pos >= stp_pct:
+                stp = True
+                stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
+                stp_cnt += 1
+                stp_cnt_max = max(stp_cnt_max, stp_cnt)
+
+        # ----- entry -----
+        if in_pos == 0 and pos_i != 0:
+            in_pos  = pos_i
+            entry_p = p_now
+            entry_d = df['date'].iloc[i]
+            stp     = False
+
+        # ----- exit on opposite cross -----
+        if in_pos != 0 and pos_i == -in_pos:
+            ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
+            if stp:
+                trades.append((entry_d, df['date'].iloc[i], -stp_pct*LEVERAGE))
+            else:
+                trades.append((entry_d, df['date'].iloc[i], ret))
+                stp_cnt = 0 if ret >= 0 else stp_cnt + 1
+                stp_cnt_max = max(stp_cnt_max, stp_cnt)
+            in_pos = 0
+            stp    = False
+
+        # ----- equity update -----
+        if stp:
+            curve.append(stp_price)
+            days_stp += 1
         else:
-          trades.append((entry_d, df['date'].iloc[i], ret))
-          if ret >= 0:
-            stp_cnt=0
-          else:
-            stp_cnt=stp_cnt+1
-            if stp_cnt_max<stp_cnt:
-              stp_cnt_max=stp_cnt
-              
-        in_pos = 0
-        stp = False
-        print(f"CROSS TRADE {trades[-1]}  ")
+            curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
 
-    # ----- equity update -------------------------------------------------------
-    if stp == True:
-      curve.append(stp_price)
-      days_stp=days_stp+1
-      print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-          f"STOP @ {df['close'].iloc[i]:>10.2f}  "
-          f"CURVE {curve[-1]}")
-      
-    else:
-      curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
-      print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-          f" {df['close'].iloc[i]:>10.2f}  "
-          f"CURVE {curve[-1]}")
-    time.sleep(0.01)
+    # ---------------------------  METRICS  -----------------------------------
+    curve = pd.Series(curve, index=df.index)
+    daily_ret = curve.pct_change().dropna()
+    trades_ret = pd.Series([t[2] for t in trades])
+    n_years = (df['date'].iloc[-1] - df['date'].iloc[0]).days / 365.25
 
-curve = pd.Series(curve, index=df.index)
+    cagr = (curve.iloc[-1] / curve.iloc[0]) ** (1 / n_years) - 1
+    vol  = daily_ret.std() * np.sqrt(252)
+    sharpe = cagr / vol if vol else np.nan
+    drawdown = curve / curve.cummax() - 1
+    maxdd = drawdown.min()
+    calmar = cagr / abs(maxdd) if maxdd else np.nan
 
-# ---------------------------  FULL METRICS  -----------------------------------
-daily_ret = curve.pct_change().dropna()
-trades_ret = pd.Series([t[2] for t in trades])
-n_years = (df['date'].iloc[-1] - df['date'].iloc[0]).days / 365.25
+    wins   = trades_ret[trades_ret > 0]
+    losses = trades_ret[trades_ret < 0]
+    win_rate = len(wins) / len(trades_ret) if trades_ret.size else 0
+    avg_win  = wins.mean()   if len(wins)   else 0
+    avg_loss = losses.mean() if len(losses) else 0
+    payoff   = abs(avg_win / avg_loss) if avg_loss else np.nan
+    profit_factor = wins.sum() / abs(losses.sum()) if losses.sum() else np.nan
+    expectancy = win_rate * avg_win - (1 - win_rate) * abs(avg_loss)
+    kelly = expectancy / trades_ret.var() if trades_ret.var() > 0 else np.nan
+    time_in_mkt = 1 - ((1 - (pos != 0).mean()) * len(df) + days_stp) / len(df)
+    tail_ratio = (np.percentile(daily_ret, 95) /
+                  abs(np.percentile(daily_ret, 5))) if daily_ret.size else np.nan
+    trades_per_year = len(trades) / n_years
 
-cagr = (curve.iloc[-1] / curve.iloc[0]) ** (1 / n_years) - 1
-vol  = daily_ret.std() * np.sqrt(252)
-sharpe = cagr / vol if vol else np.nan
-drawdown = curve / curve.cummax() - 1
-maxdd = drawdown.min()
-calmar = cagr / abs(maxdd) if maxdd else np.nan
+    # collect row
+    summary.append({
+        'lev': LEVERAGE,
+        'final': curve.iloc[-1],
+        'cagr': cagr,
+        'vol': vol,
+        'sharpe': sharpe,
+        'maxdd': maxdd,
+        'calmar': calmar,
+        'win_rate': win_rate,
+        'trades_per_year': trades_per_year,
+        'expectancy': expectancy,
+        'profit_factor': profit_factor,
+        'kelly': kelly,
+        'time_in_mkt': time_in_mkt,
+        'tail_ratio': tail_ratio,
+        'max_lose_streak': stp_cnt_max
+    })
 
-wins   = trades_ret[trades_ret > 0]
-losses = trades_ret[trades_ret < 0]
-win_rate = len(wins) / len(trades_ret) if trades_ret.size else 0
-avg_win  = wins.mean()   if len(wins)   else 0
-avg_loss = losses.mean() if len(losses) else 0
-payoff   = abs(avg_win / avg_loss) if avg_loss else np.nan
-profit_factor = wins.sum() / abs(losses.sum()) if losses.sum() else np.nan
-expectancy = win_rate * avg_win - (1 - win_rate) * abs(avg_loss)
+# ---------------------------  RESULT TABLE  ----------------------------------
+summary = pd.DataFrame(summary).set_index('lev')
+print('\n====== SUMMARY ======')
+print(summary.round(3))
 
-kelly = expectancy / trades_ret.var() if trades_ret.var() > 0 else np.nan
-
-time_in_mkt = 1-((1-(pos != 0).mean())*len(df)+days_stp)/len(df)
-tail_ratio = (np.percentile(daily_ret, 95) /
-              abs(np.percentile(daily_ret, 5))) if daily_ret.size else np.nan
-trades_per_year = len(trades) / n_years
-lose_streak = (trades_ret < 0).astype(int)
-max_lose_streak = lose_streak.groupby(
-                      lose_streak.diff().ne(0).cumsum()).sum().max()
-
-# ---------------------------  PRINT  ------------------------------------------
-final_macd = curve.iloc[-1]
-final_hold = (df['close'].iloc[-1] / df['close'].iloc[0]) * 10000
-worst      = min(trades, key=lambda x: x[2])
-
-print(f'\n===== MACD (no stop-loss, {LEVERAGE}× lev) =====')
-print(f'MACD final:        €{final_macd:,.0f}')
-print(f'Buy & Hold final:  €{final_hold:,.0f}')
-print(f'Worst trade:       {worst[2]*100:.2f}% (exit {worst[1].strftime("%Y-%m-%d")})')
-print(f'Max drawdown:      {maxdd*100:.2f}%')
-time.sleep(0.01)
-
-print('\n----- full performance stats -----')
-print(f'CAGR:               {cagr*100:6.2f}%')
-print(f'Ann. volatility:    {vol*100:6.2f}%')
-print(f'Sharpe (rf=0):      {sharpe:6.2f}')
-print(f'Max drawdown:       {maxdd*100:6.2f}%')
-print(f'Calmar:             {calmar:6.2f}')
-print(f'Trades/year:        {trades_per_year:6.1f}')
-print(f'Win-rate:           {win_rate*100:6.1f}%')
-print(f'Average win:        {avg_win*100:6.2f}%')
-time.sleep(1)
-print(f'Average loss:       {avg_loss*100:6.2f}%')
-print(f'Payoff ratio:       {payoff:6.2f}')
-print(f'Profit factor:      {profit_factor:6.2f}')
-print(f'Expectancy/trade:   {expectancy*100:6.2f}%')
-print(f'Kelly fraction:     {kelly*100:6.2f}%')
-print(f'Time in market:     {time_in_mkt*100:6.1f}%')
-print(f'Tail ratio (95/5):  {tail_ratio:6.2f}')
-print(f'Max lose streak:    {stp_cnt_max:6.0f}')
-time.sleep(1)
-
-# ---------------------  DAY-BY-DAY EQUITY CURVE (first 10 rows) ---------------
-print('\n----- equity curve (day-by-day) -----')
-print('date       close      equity')
-for idx, row in df.head(10).iterrows():          # <-- only first 10 rows
-    print(f"{row['date'].strftime('%Y-%m-%d')}  "
-          f"{row['close']:>10.2f}  "
-          f"{curve[idx]:>10.2f}")
+# quick peek: best Sharpe
+print('\nBest Sharpe:')
+print(summary.loc[summary.sharpe.idxmax()])

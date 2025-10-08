@@ -23,7 +23,7 @@ in_pos   = 0
 entry_p  = None
 entry_d  = None
 trades   = []
-stp = false
+stp = False
 stp_pct = 0.067
 
 for i in range(1, len(df)):
@@ -31,29 +31,29 @@ for i in range(1, len(df)):
     p_now  = df['close'].iloc[i]
     pos_i  = pos.iloc[i]
     
-    if entry_p/df['high'].iloc[i]*-in_pos>=stp_pct or entry_p/df['low'].iloc[i]*-in_pos>=sto_pct:
-      stp = true
+    if in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
+      stp = True
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
         in_pos  = pos_i
         entry_p = p_now
         entry_d = df['date'].iloc[i]
-        stp = false
+        stp = False
 
     # ----- exit on opposite cross ---------------------------------------------
     if in_pos != 0 and pos_i == -in_pos:
         ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
-        if stp == true:
+        if stp == True:
           trades.append((entry_d, df['date'].iloc[i], (entry_p*(1-stp_pct) / entry_p - 1) * in_pos * LEVERAGE))
         else:
           trades.append((entry_d, df['date'].iloc[i], ret))
         in_pos = 0
-        stp = false
+        stp = False
 
     # ----- equity update -------------------------------------------------------
     if stp == true:
       curve.append(curve[-1] * (1 + (entry_p*(1-stp_pct)/entry_p - 1) * in_pos * LEVERAGE))
-    else
+    else:
       curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
 
 curve = pd.Series(curve, index=df.index)

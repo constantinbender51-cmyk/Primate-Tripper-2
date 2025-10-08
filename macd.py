@@ -49,9 +49,9 @@ for i in range(1, len(df)):
     if in_pos != 0 and pos_i == -in_pos:
         ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
         if stp == True:
-          trades.append(entry_d, df['date'].iloc[i], stp_price/curve[-1]-1)
+          trades.append((entry_d, df['date'].iloc[i], stp_price/curve[-1]-1))
         else:
-          trades.append(entry_d, df['date'].iloc[i], ret)
+          trades.append((entry_d, df['date'].iloc[i], ret))
         in_pos = 0
         stp = False
         print(f"CROSS TRADE {(entry_p*(1-stp_pct) / entry_p - 1) * in_pos * LEVERAGE}  ")

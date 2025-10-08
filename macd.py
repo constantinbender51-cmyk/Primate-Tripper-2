@@ -38,7 +38,6 @@ for i in range(1, len(df)):
           f"STOP {df['close'].iloc[i]:>10.2f}  ")
       time.sleep(0.01)
     else:
-      stp=False
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f"{df['close'].iloc[i]:>10.2f}  ")
       time.sleep(0.01)

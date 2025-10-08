@@ -27,6 +27,7 @@ stp = False
 stp_pct = 0.067
 days_stp = 0
 stp_cnt = 0
+stp_cnt_max = 0
 
 for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
@@ -37,6 +38,8 @@ for i in range(1, len(df)):
       stp = True
       stp_price=curve[-1] * (1 - stp_pct * LEVERAGE)
       stp_cnt=stp_cnt+1
+      if stp_cnt_max<stp_cnt:
+              stp_cnt_max=stp_cnt_max
       
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
@@ -58,6 +61,8 @@ for i in range(1, len(df)):
             stp_cnt=0
           else if ret<0:
             stp_cnt=stp_cnt+1
+            if stp_cnt_max<stp_cnt:
+              stp_cnt_max=stp_cnt_max
               
         in_pos = 0
         stp = False
@@ -140,7 +145,7 @@ print(f'Expectancy/trade:   {expectancy*100:6.2f}%')
 print(f'Kelly fraction:     {kelly*100:6.2f}%')
 print(f'Time in market:     {time_in_mkt*100:6.1f}%')
 print(f'Tail ratio (95/5):  {tail_ratio:6.2f}')
-print(f'Max lose streak:    {max_lose_streak:6.0f}')
+print(f'Max lose streak:    {stp_cnt_max:6.0f}')
 time.sleep(1)
 
 # ---------------------  DAY-BY-DAY EQUITY CURVE (first 10 rows) ---------------

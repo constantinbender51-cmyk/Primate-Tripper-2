@@ -54,7 +54,7 @@ for i in range(1, len(df)):
           trades.append((entry_d, df['date'].iloc[i], ret))
         in_pos = 0
         stp = False
-        print(f"CROSS TRADE {(entry_p*(1-stp_pct) / entry_p - 1) * in_pos * LEVERAGE}  ")
+        print(f"CROSS TRADE {trades[-1]}  ")
 
     # ----- equity update -------------------------------------------------------
     if stp == True:

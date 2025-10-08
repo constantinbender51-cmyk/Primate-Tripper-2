@@ -62,7 +62,7 @@ for i in range(1, len(df)):
           else:
             stp_cnt=stp_cnt+1
             if stp_cnt_max<stp_cnt:
-              stp_cnt_max=stp_cnt_max
+              stp_cnt_max=stp_cnt
               
         in_pos = 0
         stp = False

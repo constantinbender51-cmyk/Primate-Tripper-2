@@ -34,7 +34,7 @@ for i in range(1, len(df)):
     
     if stp != True and in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
       stp = True
-      stp_price=curve[-1] * (1 - stp_pct)
+      stp_price=curve[-1] * (1 - stp_pct * LEVERAGE)
       
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
@@ -49,7 +49,7 @@ for i in range(1, len(df)):
     if in_pos != 0 and pos_i == -in_pos:
         ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
         if stp == True:
-          trades.append((entry_d, df['date'].iloc[i], -stp_pct))
+          trades.append((entry_d, df['date'].iloc[i], -stp_pct*LEVERAGE))
         else:
           trades.append((entry_d, df['date'].iloc[i], ret))
         in_pos = 0

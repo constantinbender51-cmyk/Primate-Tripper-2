@@ -16,52 +16,37 @@ cross = np.where((macd > signal) & (macd.shift() <= signal.shift()),  1,
                 np.where((macd < signal) & (macd.shift() >= signal.shift()), -1, 0))
 pos = pd.Series(cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
 
-# =====================  STOP-LOSS VERSION 1  =============================
+# =====================  SINGLE RUN (NO STOP-LOSS) =============================
 LEVERAGE = 3.0
-curve    = [10000] * len(df)   # 1. pre-allocate
+curve    = [10000]
 in_pos   = 0
 entry_p  = None
 entry_d  = None
-stop_p   = None
 trades   = []
 
 for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
     p_now  = df['close'].iloc[i]
-    low_i  = df['low'].iloc[i]
-    high_i = df['high'].iloc[i]
     pos_i  = pos.iloc[i]
 
-    # 1. STOP-LOSS EXIT
-    if in_pos != 0:
-        if (in_pos == 1 and low_i <= stop_p) or (in_pos == -1 and high_i >= stop_p):
-            ret = (stop_p / entry_p - 1) * in_pos * LEVERAGE
-            trades.append((entry_d, df['date'].iloc[i], ret))
-            curve[i] = curve[i-1] * (1 + ret)          # 2. write, not append
-            in_pos, entry_p, entry_d, stop_p = 0, None, None, None
-        else:
-            curve[i] = curve[i-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE)
-    else:
-        curve[i] = curve[i-1]   # flat day
-
-    # 2. MACD cross exit (only if still in)
-    if in_pos != 0 and pos_i == -in_pos:
-        ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
-        trades.append((entry_d, df['date'].iloc[i], ret))
-        curve[i] = curve[i-1] * (1 + ret)
-        in_pos, entry_p, entry_d, stop_p = 0, None, None, None
-
-    # 3. NEW ENTRY (flat after stop or cross)
+    # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
         in_pos  = pos_i
         entry_p = p_now
         entry_d = df['date'].iloc[i]
-        stop_p  = entry_p * (1 - 0.067) if in_pos == 1 else entry_p * (1 + 0.067)
 
-# 3. build Series once
+    # ----- exit on opposite cross ---------------------------------------------
+    if in_pos != 0 and pos_i == -in_pos:
+        ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
+        trades.append((entry_d, df['date'].iloc[i], ret))
+        in_pos = 0
+
+    # ----- equity update -------------------------------------------------------
+    curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+
 curve = pd.Series(curve, index=df.index)
 
-# ---------------------------  FULL METRICS  (identical) -----------------------
+# ---------------------------  FULL METRICS  -----------------------------------
 daily_ret = curve.pct_change().dropna()
 trades_ret = pd.Series([t[2] for t in trades])
 n_years = (df['date'].iloc[-1] - df['date'].iloc[0]).days / 365.25
@@ -81,7 +66,9 @@ avg_loss = losses.mean() if len(losses) else 0
 payoff   = abs(avg_win / avg_loss) if avg_loss else np.nan
 profit_factor = wins.sum() / abs(losses.sum()) if losses.sum() else np.nan
 expectancy = win_rate * avg_win - (1 - win_rate) * abs(avg_loss)
+
 kelly = expectancy / trades_ret.var() if trades_ret.var() > 0 else np.nan
+
 time_in_mkt = (pos != 0).mean()
 tail_ratio = (np.percentile(daily_ret, 95) /
               abs(np.percentile(daily_ret, 5))) if daily_ret.size else np.nan
@@ -95,7 +82,7 @@ final_macd = curve.iloc[-1]
 final_hold = (df['close'].iloc[-1] / df['close'].iloc[0]) * 10000
 worst      = min(trades, key=lambda x: x[2])
 
-print(f'\n===== MACD + 6.7% stop (v1, {LEVERAGE}× lev) =====')
+print(f'\n===== MACD (no stop-loss, {LEVERAGE}× lev) =====')
 print(f'MACD final:        €{final_macd:,.0f}')
 print(f'Buy & Hold final:  €{final_hold:,.0f}')
 print(f'Worst trade:       {worst[2]*100:.2f}% (exit {worst[1].strftime("%Y-%m-%d")})')

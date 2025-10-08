@@ -34,7 +34,7 @@ for i in range(1, len(df)):
     
     if stp != True and in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
       stp = True
-      stp_price=curve[-1] * (1 + (entry_p*(1-stp_pct)/entry_p - 1) * in_pos * LEVERAGE)
+      stp_price=curve[-1] * (1 - stp_pct)
       
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:

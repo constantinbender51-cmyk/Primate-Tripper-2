@@ -51,7 +51,7 @@ for i in range(1, len(df)):
         stp = False
 
     # ----- equity update -------------------------------------------------------
-    if stp == true:
+    if stp == True:
       curve.append(curve[-1] * (1 + (entry_p*(1-stp_pct)/entry_p - 1) * in_pos * LEVERAGE))
     else:
       curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))

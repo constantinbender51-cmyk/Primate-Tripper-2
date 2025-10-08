@@ -26,6 +26,7 @@ trades   = []
 stp = False
 stp_pct = 0.067
 days_stp = 0
+stp_cnt = 0
 
 for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
@@ -35,6 +36,7 @@ for i in range(1, len(df)):
     if stp != True and in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
       stp = True
       stp_price=curve[-1] * (1 - stp_pct * LEVERAGE)
+      stp_cnt=stp_cnt+1
       
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
@@ -52,6 +54,11 @@ for i in range(1, len(df)):
           trades.append((entry_d, df['date'].iloc[i], -stp_pct*LEVERAGE))
         else:
           trades.append((entry_d, df['date'].iloc[i], ret))
+          if ret > 0:
+            stp_cnt=0
+          else if ret<0:
+            stp_cnt=stp_cnt+1
+              
         in_pos = 0
         stp = False
         print(f"CROSS TRADE {trades[-1]}  ")
@@ -63,6 +70,7 @@ for i in range(1, len(df)):
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f"STOP @ {df['close'].iloc[i]:>10.2f}  "
           f"CURVE {curve[-1]}")
+      
     else:
       curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
@@ -75,7 +83,7 @@ curve = pd.Series(curve, index=df.index)
 # ---------------------------  FULL METRICS  -----------------------------------
 daily_ret = curve.pct_change().dropna()
 trades_ret = pd.Series([t[2] for t in trades])
-n_years = (df['date'].iloc[-1] - df['date'].iloc[0]).days / 365.25
+n_years = (df['date'].iloc[-1] - df['date'.iloc[0]).days / 365.25
 
 cagr = (curve.iloc[-1] / curve.iloc[0]) ** (1 / n_years) - 1
 vol  = daily_ret.std() * np.sqrt(252)

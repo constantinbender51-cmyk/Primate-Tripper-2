@@ -110,7 +110,7 @@ print(f'Calmar:             {calmar:6.2f}')
 print(f'Trades/year:        {trades_per_year:6.1f}')
 print(f'Win-rate:           {win_rate*100:6.1f}%')
 print(f'Average win:        {avg_win*100:6.2f}%')
-time.sleep(0.01)
+time.sleep(1)
 print(f'Average loss:       {avg_loss*100:6.2f}%')
 print(f'Payoff ratio:       {payoff:6.2f}')
 print(f'Profit factor:      {profit_factor:6.2f}')
@@ -119,7 +119,7 @@ print(f'Kelly fraction:     {kelly*100:6.2f}%')
 print(f'Time in market:     {time_in_mkt*100:6.1f}%')
 print(f'Tail ratio (95/5):  {tail_ratio:6.2f}')
 print(f'Max lose streak:    {max_lose_streak:6.0f}')
-time.sleep(0.01)
+time.sleep(1)
 
 # ---------------------  DAY-BY-DAY EQUITY CURVE  ------------------------------
 print('\n----- equity curve (day-by-day) -----')
@@ -128,4 +128,4 @@ for idx, row in df.iterrows():
     print(f"{row['date'].strftime('%Y-%m-%d')}  "
           f"{row['close']:>10.2f}  "
           f"{curve[idx]:>10.2f}")
-    time.sleep(0.01)
+    time.sleep(0.6)

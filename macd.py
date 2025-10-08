@@ -1,4 +1,4 @@
-import pandas as pd
+eimport pandas as pd
 import numpy as np
 import time
 
@@ -34,13 +34,7 @@ for i in range(1, len(df)):
     
     if in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
       stp = True
-      print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-          f"STOP {df['close'].iloc[i]:>10.2f}  ")
-      time.sleep(0.01)
-    else:
-      print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-          f"{df['close'].iloc[i]:>10.2f}  ")
-      time.sleep(0.01)
+      
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
         in_pos  = pos_i
@@ -64,8 +58,12 @@ for i in range(1, len(df)):
     if stp == True:
       curve.append(curve[-1] * (1 + (entry_p*(1-stp_pct)/entry_p - 1) * in_pos * LEVERAGE))
       days_stp=days_stp+1
+      print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+          f"STOP {df['close'].iloc[i]:>10.2f}  ")
     else:
       curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+      print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+          f" {df['close'].iloc[i]:>10.2f}  ")
 
 curve = pd.Series(curve, index=df.index)
 

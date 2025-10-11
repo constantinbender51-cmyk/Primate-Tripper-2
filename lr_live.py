@@ -245,39 +245,51 @@ def scan_signal(api: kf.KrakenFuturesApi, model6: ModelBundle, model10: ModelBun
     return "HOLD"
 
 # ------------------------------------------------------------------
-# 8.  TRADE STEP
+# 8. TRADE STEP 
 # ------------------------------------------------------------------
-def trade_step(api: kf.KrakenFuturesApi, model6: ModelBundle, model10: ModelBundle):
-    signal = scan_signal(api, model6, model10)
-    if signal == "HOLD":
-        log.info("No trade")
+def trade_step(api: kf.KrakenFuturesApi,
+               model6: ModelBundle,
+               model10: ModelBundle):
+    prev, curr = scan_signal(api, model6, model10)
+
+    # 1.  flatten only when we move TO 0
+    if prev != "HOLD" and curr == "HOLD":
+        log.info("Signal → HOLD  –  flattening")
+        cancel_all(api)
+        flatten_position(api)
         return
 
-    cancel_all(api)
-    collateral = portfolio_usd(api)
-    notional   = collateral * LEV
-    price      = mark_price(api)
-    size_btc   = round(notional / price, 4)
+    # 2.  (re)enter only when we CROSS side
+    if curr != "HOLD" and curr != prev:          # HOLD→BUY/SELL or flip side
+        collateral = portfolio_usd(api)
+        notional   = collateral * LEV
+        price      = mark_price(api)
+        size_btc   = round(notional / price, 4)
 
-    flatten_position(api)          # start flat
+        cancel_all(api)
+        flatten_position(api)               # ensure flat before flip
 
-    if dry:
-        log.info("DRY-RUN: %s %.4f BTC market", signal, size_btc)
+        side = "buy" if curr == "BUY" else "sell"
+        log.info("Signal cross %s → %s  –  market %s %.4f BTC", prev, curr, side, size_btc)
+
+        if dry:
+            log.info("DRY-RUN: %s %.4f BTC market", curr, size_btc)
+            return
+
+        ord = api.send_order({
+            "orderType": "mkt",
+            "symbol": SYMBOL_FUTS_LC,
+            "side": side,
+            "size": size_btc,
+        })
+        fill_p = float(ord.get("price", price))
+
+        pred6_today = abs(model6.predict_last(kraken_ohlc.get_ohlc(SYMBOL_OHLC, INTERVAL)))
+        place_stop(api, side, size_btc, fill_p, pred6_today)
         return
 
-    side = "buy" if signal == "BUY" else "sell"
-    log.info("Market %s %.4f BTC", side, size_btc)
-    ord = api.send_order({
-        "orderType": "mkt",
-        "symbol": SYMBOL_FUTS_LC,
-        "side": side,
-        "size": size_btc,
-    })
-    fill_p = float(ord.get("price", price))
-
-    # pred6 used for stop distance
-    pred6_today = model6.predict_last(kraken_ohlc.get_ohlc(SYMBOL_OHLC, INTERVAL))
-    place_stop(api, side, size_btc, fill_p, abs(pred6_today))
+    # 3.  no change
+    log.info("No signal change (%s → %s) –  nothing to do", prev, curr)
 
 # ------------------------------------------------------------------
 # 9.  SCHEDULER

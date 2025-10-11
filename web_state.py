@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 from flask import Flask, render_template_string
+from datetime import datetime
 
 STATE_FILE = Path("lr_state.json")
 PORT = int(os.getenv("PORT", 8080))          # Railway injects PORT
@@ -42,7 +43,11 @@ def index():
         pretty = json.dumps(st, indent=2, sort_keys=True)
     else:
         pretty = "{}"
-    return render_template_string(TMPL, state=pretty, updated=pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"))
+    return render_template_string(
+        TMPL,
+        state=pretty,
+        updated=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    )
 
 def run_web():
     # Suppress Flask default logging unless you want it

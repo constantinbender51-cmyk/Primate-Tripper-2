@@ -25,6 +25,9 @@ import pandas as pd
 import kraken_futures as kf
 import kraken_ohlc
 
+dry = os.getenv("DRY_RUN", "false").lower() in {"1", "true", "yes"}
+#  remove argparse --dry completely
+
 SYMBOL_FUTS_UC = "PF_XBTUSD"
 SYMBOL_FUTS_LC = "pf_xbtusd"
 SYMBOL_OHLC    = "XBTUSD"

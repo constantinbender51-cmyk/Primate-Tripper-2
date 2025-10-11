@@ -17,7 +17,8 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict
-
+# ----------  NEW: start web dashboard  ----------
+import subprocess
 import numpy as np
 import pandas as pd
 
@@ -326,6 +327,8 @@ def main():
     log.info("Models ready")
 
     smoke_test(api, model6, model10)
+    log.info("Starting web dashboard on port %s", os.getenv("PORT", 8080))
+    subprocess.Popen([sys.executable, "web_state.py"])        
 
     # daily loop
     while True:

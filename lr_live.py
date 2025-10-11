@@ -9,7 +9,6 @@ Stop-loss is placed immediately after entry:
 Exchange will trigger the stop-order for us – no daily re-check needed.
 """
 
-import argparse
 import json
 import logging
 import os

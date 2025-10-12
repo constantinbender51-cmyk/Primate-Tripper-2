@@ -29,6 +29,11 @@ import kraken_ohlc
 dry = os.getenv("DRY_RUN", "false").lower() in {"1", "true", "yes"}
 # -------------------------------------------------------------------
 
+# ----------  NEW: add a flag so we can run trade_step once ----------
+RUN_TRADE_NOW = os.getenv("RUN_TRADE_NOW", "false").lower() in {"1", "true", "yes"}
+# -------------------------------------------------------------------
+
+
 SYMBOL_FUTS_UC = "PF_XBTUSD"
 SYMBOL_FUTS_LC = "pf_xbtusd"
 SYMBOL_OHLC    = "XBTUSD"
@@ -326,6 +331,14 @@ def main():
     log.info("Models ready")
 
     smoke_test(api, model6, model10)
+
+    if RUN_TRADE_NOW:                       # <-- single immediate run
+        log.info("RUN_TRADE_NOW=true – executing trade_step once")
+        try:
+            trade_step(api, model6, model10)
+        except Exception as exc:
+            log.exception("Immediate trade_step failed: %s", exc)
+
     log.info("Starting web dashboard on port %s", os.getenv("PORT", 8080))
     subprocess.Popen([sys.executable, "web_state.py"])        
 

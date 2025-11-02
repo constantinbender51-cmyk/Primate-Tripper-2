@@ -1,2 +1,2 @@
-worker: python lr_live_bi.py
+worker: python binance_ohlc.py
 

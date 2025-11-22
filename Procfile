@@ -1,2 +1,2 @@
-worker: python trpper2.py
+worker: python tripper2.py
 

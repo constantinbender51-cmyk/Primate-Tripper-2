@@ -57,8 +57,8 @@ class ModelBundle:
         """Train on 50% of data, store mu/sigma/theta."""
         d = df.copy()
         
-        # Calculate target: price change 'horizon' days ahead
-        d["y"] = (d["close"].shift(-self.horizon) / d["close"] - 1) * 100
+        # Calculate target: actual price 'horizon' days ahead
+        d["y"] = d["close"].shift(-self.horizon)
         d = d.dropna(subset=["y"])
         
         # Build features
@@ -165,12 +165,11 @@ def smoke_test(api: kf.KrakenFuturesApi, model: ModelBundle):
 
     # Make prediction
     pred = model.predict_last(df)
-    log.info("1-day prediction=%.2f %%", pred)
+    log.info("3-day price prediction: %.2f", pred)
     
     # Determine signal
-    signal = "SHORT" if pred > 0 else "LONG"
-    log.info("Signal: %s (pred=%.2f%%, implies tomorrow close %.2f)", 
-             signal, pred, mp * (1 + pred/100))
+    signal = "SHORT" if pred < mp else "LONG"
+    log.info("Signal: %s (predicted=%.2f, current=%.2f)", signal, pred, mp)
 
     # Test market order
     log.info("Sending TEST market buy %.4f BTC", TEST_SIZE_BTC)
@@ -190,13 +189,13 @@ def smoke_test(api: kf.KrakenFuturesApi, model: ModelBundle):
 
 def trade_step(api: kf.KrakenFuturesApi, model: ModelBundle):
     """
-    Daily trading logic:
+    Trading logic (executed every 3 days):
     1. Close any existing position
     2. Wait 3 minutes for candle to form
-    3. Get fresh data and make prediction
+    3. Get fresh data and predict price 3 days ahead
     4. Open new position based on prediction
     """
-    log.info("=== Starting daily trade step ===")
+    log.info("=== Starting trade step (3-day cycle) ===")
     
     # Step 1: Close existing position
     log.info("Step 1: Flattening any existing positions")
@@ -208,16 +207,16 @@ def trade_step(api: kf.KrakenFuturesApi, model: ModelBundle):
     time.sleep(WAIT_FOR_CANDLE_SEC)
     
     # Step 3: Get fresh data and predict
-    log.info("Step 3: Fetching fresh Kraken data and making prediction")
+    log.info("Step 3: Fetching fresh Kraken data and making 3-day prediction")
     df = kraken_ohlc.get_ohlc(SYMBOL_OHLC_KRAKEN, INTERVAL_KRAKEN)
-    pred_pct = model.predict_last(df)
+    predicted_price = model.predict_last(df)
     
     # Get current market price
     current_price = mark_price(api)
-    predicted_price = current_price * (1 + pred_pct / 100)
+    predicted_price = pred_pct
     
     log.info("Current price: %.2f", current_price)
-    log.info("Predicted price (1-day ahead): %.2f (%.2f%%)", predicted_price, pred_pct)
+    log.info("Predicted price (3 days ahead): %.2f", predicted_price)
     
     # Step 4: Determine signal and open position
     if predicted_price > current_price:
@@ -263,6 +262,15 @@ def wait_until_00_00_utc():
     time.sleep(wait_sec)
 
 
+def wait_three_days():
+    """Wait exactly 3 days until next trade execution."""
+    wait_sec = 3 * 24 * 60 * 60  # 3 days in seconds
+    next_run = datetime.utcnow() + timedelta(days=3)
+    log.info("Next trade execution at %s (in 3 days), sleeping %.0f seconds", 
+             next_run.strftime("%Y-%m-%d %H:%M UTC"), wait_sec)
+    time.sleep(wait_sec)
+
+
 def main():
     api_key = os.getenv("KRAKEN_API_KEY")
     api_sec = os.getenv("KRAKEN_API_SECRET")
@@ -298,12 +306,12 @@ def main():
         log.error("Insufficient training data (need at least 400 days for 365-day SMA)")
         sys.exit(1)
     
-    # Train model (1-day ahead prediction)
-    log.info("Training model with 1-day ahead prediction...")
-    model = ModelBundle(horizon=1)
+    # Train model (3-day ahead prediction)
+    log.info("Training model with 3-day ahead prediction...")
+    model = ModelBundle(horizon=3)
     model.fit(df_train)
     log.info("Model training complete!")
-    log.info("Model will predict on Kraken live data, trained once on Binance historical data")
+    log.info("Model will predict 3 days ahead on Kraken live data, trained once on Binance historical data")
 
     # Run smoke test
     smoke_test(api, model)
@@ -320,17 +328,17 @@ def main():
     log.info("Starting web dashboard on port %s", os.getenv("PORT", 8080))
     subprocess.Popen([sys.executable, "web_state.py"])
 
-    # Main loop: execute trade daily at 00:00 UTC
-    log.info("Entering main loop (daily execution at 00:00 UTC)")
+    # Main loop: execute trade every 3 days
+    log.info("Entering main loop (trade execution every 3 days)")
     while True:
-        wait_until_00_00_utc()
+        wait_three_days()
         try:
             trade_step(api, model)
         except KeyboardInterrupt:
             log.info("Interrupted by user")
             break
         except Exception as exc:
-            log.exception("Daily trade step failed: %s", exc)
+            log.exception("Trade step failed: %s", exc)
 
 
 if __name__ == "__main__":

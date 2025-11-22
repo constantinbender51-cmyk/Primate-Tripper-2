@@ -281,6 +281,11 @@ def main():
         interval=INTERVAL_BINANCE
     )
     
+    # Convert timestamp to datetime and set as index
+    log.info("Converting timestamp to datetime index...")
+    df_all['timestamp'] = pd.to_datetime(df_all['timestamp'])
+    df_all.set_index('timestamp', inplace=True)
+    
     # Filter to training period: Jan 1, 2022 - Sep 30, 2023
     df_train = df_all[
         (df_all.index >= "2022-01-01") & 

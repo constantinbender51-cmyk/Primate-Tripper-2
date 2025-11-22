@@ -1,2 +1,2 @@
-worker: python lr_live_bi.py
+worker: python trpper2.py
 

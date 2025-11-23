@@ -2,10 +2,10 @@
 """
 lr_live_sma.py - Live trading bot with SMA-based strategy
 Key features:
-1. Train on Binance data (Jan 2022 - Sep 2023) scaled to recent price levels
+1. Train on Binance data (Jan 2024 - Nov 2025) - no scaling needed
 2. Use 4 SMA features: 7-day & 365-day price SMA, 5-day & 10-day volume SMA
-3. Predict actual price 3 days ahead
-4. Every 3 days: compare prediction made 3 days ago vs actual, trade accordingly
+3. "3-day prediction" = prediction made 3 days ago for today
+4. Daily trading: if prediction > actual → SHORT, if prediction < actual → LONG
 5. No leverage, no stop loss
 """
 
@@ -89,56 +89,60 @@ class ModelBundle:
 
     def backtest(self, df: pd.DataFrame) -> Dict:
         """
-        Backtest on the second 50% of data.
-        Returns dict with performance metrics.
+        Backtest on the second 50% of data with DAILY trading.
+        For each day N:
+        - Use data up to day N-3 to predict day N
+        - Compare prediction to actual price on day N
+        - Trade accordingly and hold for 1 day
         """
         d = df.copy()
-        d["y"] = d["close"].shift(-self.horizon)
-        d = d.dropna(subset=["y"])
         
-        feats = self._build_features(d)
-        split = int(len(feats) * 0.5)
+        # We need the full dataframe with indices to properly slice
+        # Start from where we have enough data for features + 3-day lag
+        split = int(len(d) * 0.5)
         
-        # Test on second half
-        X_test = feats[split:]
-        y_test = d["y"].values[split:]
-        
-        # Make predictions
-        Xz = (X_test - self.mu) / self.sigma
-        Xb = np.c_[np.ones(Xz.shape[0]), Xz]
-        predictions = Xb @ self.theta
-        
-        # Calculate strategy performance
         capital = 1000.0
         trades = []
         
-        for i in range(len(predictions)):
-            pred_price = predictions[i]
-            actual_price = y_test[i]
-            
-            # Get the price 3 days before this prediction
-            # This is the "entry" price
-            idx = split + i
-            if idx < self.horizon:
+        # For each day in test set
+        for i in range(split, len(d) - 1):  # -1 because we need next day's price
+            # Check if we have enough history (need at least 365 days for SMA)
+            if i < 365 + 3:
                 continue
-            entry_price = d["close"].iloc[idx - self.horizon]
             
-            # Calculate actual return
-            actual_return = (actual_price - entry_price) / entry_price
+            # Use data up to 3 days before day i to make prediction for day i
+            df_historical = d.iloc[:i-3]
             
-            # Trading logic: if prediction > actual → SHORT (negative return)
-            #                if prediction < actual → LONG (positive return)
-            if pred_price > actual_price:
-                # We were too optimistic → SHORT
+            try:
+                # Predict what day i's price will be (using data from day i-3)
+                predicted_price = self.predict_last(df_historical)
+            except:
+                continue
+            
+            actual_price = d["close"].iloc[i]
+            next_day_price = d["close"].iloc[i+1]
+            
+            # Calculate actual return from day i to day i+1
+            actual_return = (next_day_price - actual_price) / actual_price
+            
+            # Trading logic: 
+            # If prediction > actual → SHORT → negative return
+            # If prediction < actual → LONG → positive return
+            if predicted_price > actual_price:
+                # Prediction was too high → SHORT
                 ret = -actual_return
+                signal = "SHORT"
             else:
-                # We were too pessimistic → LONG
+                # Prediction was too low → LONG
                 ret = actual_return
+                signal = "LONG"
             
             capital *= (1 + ret)
             trades.append({
-                'pred': pred_price,
+                'date': d.index[i],
+                'pred': predicted_price,
                 'actual': actual_price,
+                'signal': signal,
                 'return': ret,
                 'capital': capital
             })
@@ -229,22 +233,25 @@ def smoke_test(api: kf.KrakenFuturesApi, model: ModelBundle):
     mp  = mark_price(api)
     log.info("Fetched %d days  flex=%.2f USD  mark=%.2f", len(df), usd, mp)
 
-    # Simulate what we would have predicted 3 days ago
-    if len(df) < 4:
+    # Simulate: prediction made 3 days ago for yesterday
+    if len(df) < 5:
         log.warning("Not enough data for smoke test")
         return
     
-    three_days_ago_idx = len(df) - 4
-    df_historical = df.iloc[:three_days_ago_idx]
+    # Yesterday is index -1, so 3 days before yesterday is index -4
+    yesterday_idx = len(df) - 1
+    three_days_before_yesterday_idx = yesterday_idx - 3
+    
+    df_historical = df.iloc[:three_days_before_yesterday_idx]
     
     pred = model.predict_last(df_historical)
-    actual_today = df["close"].iloc[-1]
+    actual_yesterday = df["close"].iloc[yesterday_idx]
     
-    log.info("3-day prediction (made 3 days ago): %.2f", pred)
-    log.info("Actual price today: %.2f", actual_today)
+    log.info("Prediction made 3 days ago for yesterday: %.2f", pred)
+    log.info("Actual close yesterday: %.2f", actual_yesterday)
     
     # Determine signal
-    signal = "SHORT" if pred > actual_today else "LONG"
+    signal = "SHORT" if pred > actual_yesterday else "LONG"
     log.info("Signal: %s", signal)
 
     # Test market order
@@ -265,51 +272,54 @@ def smoke_test(api: kf.KrakenFuturesApi, model: ModelBundle):
 
 def trade_step(api: kf.KrakenFuturesApi, model: ModelBundle):
     """
-    Trading logic (executed every 3 days):
+    Daily trading logic (executed at 00:00 UTC):
     1. Close any existing position
-    2. Wait 3 minutes for candle to form
-    3. Get data and simulate prediction made 3 days ago
-    4. Compare to actual price today
+    2. Wait 3 minutes for yesterday's candle to form
+    3. Get prediction made 3 days ago for yesterday
+    4. Compare to yesterday's actual close
     5. Open position based on comparison
     """
-    log.info("=== Starting trade step (3-day cycle) ===")
+    log.info("=== Starting daily trade step ===")
     
     # Step 1: Close existing position
     log.info("Step 1: Flattening any existing positions")
     cancel_all(api)
     flatten_position(api)
     
-    # Step 2: Wait for candle to form
-    log.info("Step 2: Waiting %d seconds for candle to form...", WAIT_FOR_CANDLE_SEC)
+    # Step 2: Wait for yesterday's candle to form
+    log.info("Step 2: Waiting %d seconds for yesterday's candle to form...", WAIT_FOR_CANDLE_SEC)
     time.sleep(WAIT_FOR_CANDLE_SEC)
     
     # Step 3: Get fresh data
     log.info("Step 3: Fetching fresh Kraken data")
     df = kraken_ohlc.get_ohlc(SYMBOL_OHLC_KRAKEN, INTERVAL_KRAKEN)
     
-    if len(df) < 4:
-        log.error("Not enough data to make 3-day-old prediction")
+    if len(df) < 5:
+        log.error("Not enough data to make prediction")
         return
     
-    # Step 4: Simulate what we would have predicted 3 days ago for today
-    three_days_ago_idx = len(df) - 4
-    df_historical = df.iloc[:three_days_ago_idx]
+    # Step 4: Get prediction made 3 days ago for yesterday
+    yesterday_idx = len(df) - 1
+    three_days_before_yesterday_idx = yesterday_idx - 3
+    
+    # Use only data available 3 days before yesterday
+    df_historical = df.iloc[:three_days_before_yesterday_idx]
     
     predicted_price = model.predict_last(df_historical)
-    actual_price_today = df["close"].iloc[-1]
+    actual_price_yesterday = df["close"].iloc[yesterday_idx]
     
-    log.info("Price predicted 3 days ago for today: %.2f", predicted_price)
-    log.info("Actual price today: %.2f", actual_price_today)
+    log.info("Prediction made 3 days ago for yesterday: %.2f", predicted_price)
+    log.info("Actual close yesterday: %.2f", actual_price_yesterday)
     
     # Step 5: Determine signal and open position
-    if predicted_price > actual_price_today:
+    if predicted_price > actual_price_yesterday:
         signal = "SHORT"
         side = "sell"
-        log.info("Signal: SHORT (prediction was too high - we were too optimistic)")
+        log.info("Signal: SHORT (prediction > actual, we were too optimistic)")
     else:
         signal = "LONG"
         side = "buy"
-        log.info("Signal: LONG (prediction was too low - we were too pessimistic)")
+        log.info("Signal: LONG (prediction < actual, we were too pessimistic)")
     
     # Calculate position size (no leverage)
     collateral = portfolio_usd(api)
@@ -334,12 +344,15 @@ def trade_step(api: kf.KrakenFuturesApi, model: ModelBundle):
     log.info("=== Trade step complete ===")
 
 
-def wait_three_days():
-    """Wait exactly 3 days until next trade execution."""
-    wait_sec = 3 * 24 * 60 * 60  # 3 days in seconds
-    next_run = datetime.utcnow() + timedelta(days=3)
-    log.info("Next trade execution at %s (in 3 days), sleeping %.0f seconds", 
-             next_run.strftime("%Y-%m-%d %H:%M UTC"), wait_sec)
+def wait_until_00_00_utc():
+    """Wait until next 00:00 UTC."""
+    now = datetime.utcnow()
+    next_run = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if now >= next_run:
+        next_run += timedelta(days=1)
+    wait_sec = (next_run - now).total_seconds()
+    log.info("Next run at 00:00 UTC (%s), sleeping %.0f seconds", 
+             next_run.strftime("%Y-%m-%d"), wait_sec)
     time.sleep(wait_sec)
 
 
@@ -353,7 +366,7 @@ def main():
     api = kf.KrakenFuturesApi(api_key, api_sec)
 
     # ============================================================
-    # Training Phase: Use Binance data from Jan 2022 - Sep 2023
+    # Training Phase: Use Binance data from Jan 2024 - Nov 2025
     # ============================================================
     log.info("Fetching Binance historical data for training...")
     df_all = binance_ohlc.get_ohlc_for_training(
@@ -366,41 +379,19 @@ def main():
     df_all['timestamp'] = pd.to_datetime(df_all['timestamp'])
     df_all.set_index('timestamp', inplace=True)
     
-    # Filter to training period: Jan 1, 2022 - Sep 30, 2023
+    # Filter to training period: Jan 1, 2024 - Nov 23, 2025
     df_train = df_all[
-        (df_all.index >= "2022-01-01") & 
-        (df_all.index <= "2023-09-30")
+        (df_all.index >= "2024-01-01") & 
+        (df_all.index <= "2025-11-23")
     ].copy()
     
-    log.info(f"Filtered training data: {len(df_train)} days (Jan 2022 - Sep 2023)")
+    log.info(f"Filtered training data: {len(df_train)} days (Jan 2024 - Nov 2025)")
+    log.info(f"Price range: ${df_train['close'].min():.2f} - ${df_train['close'].max():.2f}")
+    log.info(f"Average price: ${df_train['close'].mean():.2f}")
     
     if len(df_train) < 400:  # Need at least 365 days for 365-day SMA
         log.error("Insufficient training data (need at least 400 days for 365-day SMA)")
         sys.exit(1)
-    
-    # ============================================================
-    # Scale training data to match recent price levels
-    # ============================================================
-    log.info("Scaling training data to recent price levels...")
-    
-    # Get recent 30 days of data to calculate scaling factor
-    df_recent = df_all.tail(30)
-    avg_price_recent = df_recent['close'].mean()
-    avg_price_training = df_train['close'].mean()
-    scale_factor = avg_price_recent / avg_price_training
-    
-    log.info(f"Recent 30-day avg price: ${avg_price_recent:.2f}")
-    log.info(f"Training period avg price: ${avg_price_training:.2f}")
-    log.info(f"Scale factor: {scale_factor:.4f}")
-    
-    # Scale ALL price and volume columns
-    df_train['open'] = df_train['open'] * scale_factor
-    df_train['high'] = df_train['high'] * scale_factor
-    df_train['low'] = df_train['low'] * scale_factor
-    df_train['close'] = df_train['close'] * scale_factor
-    df_train['volume'] = df_train['volume'] * scale_factor
-    
-    log.info(f"Scaled training data - new avg price: ${df_train['close'].mean():.2f}")
     
     # Train model (3-day ahead prediction)
     log.info("Training model with 3-day ahead prediction...")
@@ -409,9 +400,9 @@ def main():
     log.info("Model training complete!")
     
     # ============================================================
-    # Backtest on scaled data
+    # Backtest on test set (second 50%) with DAILY trading
     # ============================================================
-    log.info("=== Running backtest on test set ===")
+    log.info("=== Running backtest on test set (daily trading) ===")
     backtest_results = model.backtest(df_train)
     
     log.info(f"Backtest Results:")
@@ -420,20 +411,21 @@ def main():
     log.info(f"  Return: {backtest_results['return_pct']:.2f}%")
     log.info(f"  Number of Trades: {backtest_results['num_trades']}")
     
-    # Show first 5 and last 5 trades
+    # Show first 10 and last 10 trades
     trades = backtest_results['trades']
     if len(trades) > 0:
-        log.info("First 5 trades:")
-        for i, trade in enumerate(trades[:5]):
-            log.info(f"  Trade {i+1}: pred=${trade['pred']:.2f} actual=${trade['actual']:.2f} "
+        log.info("First 10 trades:")
+        for i, trade in enumerate(trades[:10]):
+            log.info(f"  {trade['date'].strftime('%Y-%m-%d')}: {trade['signal']} "
+                    f"pred=${trade['pred']:.2f} actual=${trade['actual']:.2f} "
                     f"return={trade['return']*100:.2f}% capital=${trade['capital']:.2f}")
         
-        if len(trades) > 5:
+        if len(trades) > 10:
             log.info("...")
-            log.info("Last 5 trades:")
-            for i, trade in enumerate(trades[-5:]):
-                idx = len(trades) - 5 + i + 1
-                log.info(f"  Trade {idx}: pred=${trade['pred']:.2f} actual=${trade['actual']:.2f} "
+            log.info("Last 10 trades:")
+            for trade in trades[-10:]:
+                log.info(f"  {trade['date'].strftime('%Y-%m-%d')}: {trade['signal']} "
+                        f"pred=${trade['pred']:.2f} actual=${trade['actual']:.2f} "
                         f"return={trade['return']*100:.2f}% capital=${trade['capital']:.2f}")
     
     log.info("=== Backtest complete ===")
@@ -453,17 +445,17 @@ def main():
     log.info("Starting web dashboard on port %s", os.getenv("PORT", 8080))
     subprocess.Popen([sys.executable, "web_state.py"])
 
-    # Main loop: execute trade every 3 days
-    log.info("Entering main loop (trade execution every 3 days)")
+    # Main loop: execute trade daily at 00:00 UTC
+    log.info("Entering main loop (daily execution at 00:00 UTC)")
     while True:
-        wait_three_days()
+        wait_until_00_00_utc()
         try:
             trade_step(api, model)
         except KeyboardInterrupt:
             log.info("Interrupted by user")
             break
         except Exception as exc:
-            log.exception("Trade step failed: %s", exc)
+            log.exception("Daily trade step failed: %s", exc)
 
 
 if __name__ == "__main__":
